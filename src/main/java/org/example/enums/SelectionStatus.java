@@ -1,11 +1,14 @@
 package org.example.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
+
 //枚举构造器：类似普通类，但是构造方法是private，且能够封装固定状态被外部引用
 //枚举与常量的区别在于 枚举指定一或多组互斥的业务状态，常量在于指定固定的单个值
-public enum SelectionStatus {
+public enum SelectionStatus  {
     NORMAL(0, "正常"),
     WITHDRAWN(1, "已退");
 
+    @EnumValue
     private final int code;
     private final String desc;
 
@@ -17,4 +20,5 @@ public enum SelectionStatus {
 
     public int getCode() { return code; }
     public String getDesc() { return desc; }
+
 }

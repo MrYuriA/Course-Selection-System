@@ -1,12 +1,10 @@
 package org.example.controller;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.exception.BusinessException;
 import org.example.pojo.Result;
-import org.example.pojo.SelectCourseRequest;
 import org.example.service.CourseSelectionService;
 import org.example.util.UserContext;
 import org.springframework.web.bind.annotation.*;
@@ -23,10 +21,16 @@ public class CourseSelectionController {
 
     @PostMapping("/select")
     public Result<Void> selectCourse(@RequestParam Long courseId) {
+
         Long studentId = UserContext.getCurrentStudentId();
+
+
+        // 原有的判断逻辑依然保留，只是在测试模式下调高日志级别方便观察
         if (studentId == null) {
             throw new BusinessException(401, "未登录或Token失效");
         }
+
+        log.info("选课请求，学生ID：{}，课程ID：{}", studentId, courseId);
         courseSelectionService.selectCourse(studentId, courseId);
         return Result.success();
     }
