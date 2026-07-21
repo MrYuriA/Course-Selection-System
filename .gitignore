@@ -1,0 +1,23 @@
+# MySQL 数据目录
+mysql_data/
+
+# 编译输出
+target/
+*.class
+
+# IDE 相关
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+
+# 日志文件
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

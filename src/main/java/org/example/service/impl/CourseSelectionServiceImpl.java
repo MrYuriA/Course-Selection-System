@@ -1,0 +1,109 @@
+package org.example.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;  // 别忘了加这个
+import org.example.enums.SelectionStatus;
+import org.example.exception.BusinessException;
+import org.example.mapper.CourseMapper;
+import org.example.mapper.CourseSelectionMapper;
+import org.example.mapper.StudentMapper;
+import org.example.pojo.Course;
+import org.example.pojo.CourseSelection;
+import org.example.pojo.Student;
+import org.example.service.CourseSelectionService;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+
+@Slf4j  // 类上加这个注解
+@Service
+@RequiredArgsConstructor
+public class CourseSelectionServiceImpl implements CourseSelectionService {
+
+    private final StudentMapper studentMapper;
+    private final CourseMapper courseMapper;
+    private final CourseSelectionMapper courseSelectionMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void selectCourse(Long studentId, Long courseId) {
+
+        // 1. 检查学生是否存在
+        Student student = studentMapper.selectById(studentId);
+        if (student == null) {
+            log.warn("选课失败：学生不存在。学生ID: {}", studentId);  // ← 加 WARN
+            throw new BusinessException("学生不存在");
+        }
+
+        // 2. 检查课程是否存在、是否开放、容量是否已满
+        Course course = courseMapper.selectById(courseId);
+        if (course == null || !(course.getIsOpen())) {
+            log.warn("选课失败：课程不存在或未开放。课程ID: {}", courseId);  // ← 加 WARN
+            throw new BusinessException("课程不存在或未开放");
+        }
+        if (course.getSelectedCount() >= course.getCapacity()) {
+            log.warn("选课失败：课程容量已满。课程ID: {}, 当前人数: {}, 容量: {}",
+                    courseId, course.getSelectedCount(), course.getCapacity());  // ← 加 WARN
+            throw new BusinessException("课程容量已满");
+        }
+
+        // 3. 防止重复选课
+        Long count = courseSelectionMapper.selectCount(
+                new LambdaQueryWrapper<CourseSelection>()
+                        .eq(CourseSelection::getStudentId, studentId)
+                        .eq(CourseSelection::getCourseId, courseId)
+                        .eq(CourseSelection::getStatus, SelectionStatus.NORMAL.getCode())
+        );
+        if (count > 0) {
+            log.warn("选课失败：重复选课。学生ID: {}, 课程ID: {}", studentId, courseId);  // ← 加 WARN
+            throw new BusinessException("请勿重复选课");
+        }
+
+        // 4. 时间冲突检查
+        int conflictCount = courseSelectionMapper.countTimeConflict(studentId,
+                course.getStartTime(), course.getEndTime());
+        if (conflictCount > 0) {
+            log.warn("选课失败：与已选课程时间冲突。学生ID: {}, 课程ID: {}, 新课时间: {} - {}",
+                    studentId, courseId, course.getStartTime(), course.getEndTime());  // ← 加 WARN
+            throw new BusinessException("与已选课程时间冲突");
+        }
+
+        // 5. 学分上限校验
+        int currentCredits = courseSelectionMapper.sumSelectedCredits(studentId);
+
+        BigDecimal currentCreditsDecimal = BigDecimal.valueOf(currentCredits);
+        BigDecimal estimatedTotal = course.getCredit().add(currentCreditsDecimal);
+
+        if (estimatedTotal.compareTo(student.getMaxCredit()) > 0) {
+            log.warn("选课失败：超过学分上限。学生ID: {}, 已选学分: {}, 新课学分: {}, 学分上限: {}",
+                    studentId, currentCredits, course.getCredit(), student.getMaxCredit());  // ← 加 WARN
+            throw new BusinessException("超过学分上限");
+        }
+
+        // 6. 执行选课
+        CourseSelection selection = new CourseSelection();
+        selection.setStudentId(studentId);
+        selection.setCourseId(courseId);
+        selection.setStatus(SelectionStatus.NORMAL);
+        courseSelectionMapper.insert(selection);
+
+        // 更新课程已选人数
+        int update = courseMapper.update(null, new LambdaUpdateWrapper<Course>()
+                .setSql("selected_count = selected_count + 1")
+                .eq(Course::getId, courseId)
+                .apply("selected_count < capacity")
+        );
+        if (update == 0) {
+            log.warn("选课失败：并发冲突，课程刚刚已满。学生ID: {}, 课程ID: {}",
+                    studentId, courseId);  // ← 加 WARN
+            throw new BusinessException("选课失败，课程刚刚已满");
+        }
+
+        // 7. 选课成功
+        log.info("选课成功。学生ID: {}, 课程ID: {}, 课程名: {}, 学分: {}",
+                studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
+    }
+}
