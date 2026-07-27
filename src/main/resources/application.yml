@@ -14,9 +14,9 @@ spring:
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
+          max-active: 2
+          max-idle: 2
+          min-idle: 1
 
 # 日志配置
 logging:

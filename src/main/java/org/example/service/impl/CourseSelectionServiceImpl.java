@@ -34,6 +34,10 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
     @Transactional(rollbackFor = Exception.class)
     public void selectCourse(Long studentId, Long courseId) {
 
+        if (studentId == null || courseId == null) {
+            throw new BusinessException("学生ID和课程ID不能为空");
+        }
+
         String lockKey = "lock:course:" + courseId;
         String lockValue = String.valueOf(studentId);
 
@@ -126,4 +130,63 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         }
         }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelCourse(Long studentId, Long courseId) {
+
+        if (studentId == null || courseId == null) {
+            throw new BusinessException("学生ID和课程ID不能为空");
+        }
+
+        String lockKey = "lock:course:" + courseId;
+        String lockValue = String.valueOf(studentId);
+
+        // 尝试获取锁，最多等待3秒
+        boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));
+
+        if (!locked) {
+            log.warn("选课失败：系统繁忙，请稍后重试。课程ID：{}", courseId);
+            throw new BusinessException("系统繁忙，请稍后重试");
+        }
+
+        try{
+            // 1. 查询该学生的正常选课记录
+            CourseSelection selection = courseSelectionMapper.selectOne(
+                    new LambdaQueryWrapper<CourseSelection>()
+                            .eq(CourseSelection::getStudentId, studentId)
+                            .eq(CourseSelection::getCourseId, courseId)
+                            .eq(CourseSelection::getStatus, SelectionStatus.NORMAL)
+            );
+            if (selection == null) {
+                log.warn("退课失败：选课记录不存在或已退课。学生ID: {}, 课程ID: {}", studentId, courseId);
+                throw new BusinessException("选课记录不存在或已退课");
+            }
+
+            // 2. 检查课程是否存在（可选，但建议校验）
+            Course course = courseMapper.selectById(courseId);
+            if (course == null) {
+                throw new BusinessException("课程不存在");
+            }
+
+            // 3. 更新选课状态为已退
+            selection.setStatus(SelectionStatus.WITHDRAWN);
+            courseSelectionMapper.updateById(selection);
+
+            // 4. 课程已选人数减1（不能小于0）
+            int update = courseMapper.update(null,
+                    new LambdaUpdateWrapper<Course>()
+                            .setSql("selected_count = selected_count - 1")
+                            .eq(Course::getId, courseId)
+                            .apply("selected_count > 0")  // 防止减成负数
+            );
+            if (update == 0) {
+                log.error("退课异常：课程已选人数已为0。课程ID: {}", courseId);
+                throw new BusinessException("退课失败，课程人数异常");
+            }
+
+            log.info("退课成功。学生ID: {}, 课程ID: {}, 课程名: {}", studentId, courseId, course.getName());
+        }finally {
+            redisLockUtil.unlock(lockKey, lockValue);
+        }
+    }
 }
