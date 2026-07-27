@@ -48,11 +48,11 @@ public class CourseQueryParam {
     private Boolean isOpen;                             // 布尔值，不需要校验
 
     @Schema(description = "排序字段，如 id、name、teacherName、credit")
-    @Pattern(regexp = "^(id|name|teacherName|credit|capacity|startTime|endTime|classroom|semester)$",
+    @Pattern(regexp = "^(|id|name|teacherName|credit|capacity|startTime|endTime|classroom|semester)$",
             message = "排序字段不合法")
     private String sortField;
 
     @Schema(description = "排序方向，asc 或 desc")
-    @Pattern(regexp = "^(asc|desc)$", message = "排序方向只能为 asc 或 desc")
+    @Pattern(regexp = "^(|asc|desc)$", message = "排序方向只能为 asc 或 desc")
     private String sortOrder;
 }

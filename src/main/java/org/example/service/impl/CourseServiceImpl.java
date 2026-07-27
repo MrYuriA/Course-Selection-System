@@ -10,6 +10,8 @@ import org.example.pojo.Course;
 import org.example.pojo.CourseQueryParam;
 import org.example.pojo.PageResult;
 import org.example.service.CourseService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -34,12 +36,14 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
+    @CacheEvict(value = "coursePage", allEntries = true)
     public void addCourseInfo( Course course) {
         courseMapper.insert(course);
         log.info("添加课程成功,课程名称{},教师名称{}", course.getName(), course.getTeacherName());
     }
 
     @Override
+    @CacheEvict(value = "coursePage", allEntries = true)
     public void updateCourseInfo(Long id, Course course) {
 
         if (course.getStartTime().isAfter(course.getEndTime()) ||
@@ -59,6 +63,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
+    @CacheEvict(value = "coursePage", allEntries = true)
     public void delCourseInfo(Long id) {
 
         int rows = courseMapper.deleteById(id);
@@ -70,6 +75,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
+    @Cacheable(value = "coursePage", key = "#courseQueryParam.hashCode()")
     public PageResult<Course> getPageInfo(CourseQueryParam courseQueryParam) {
         // 1. 创建分页对象
         Page<Course> page = new Page<>(courseQueryParam.getPage(),
@@ -131,17 +137,24 @@ public class CourseServiceImpl implements CourseService {
 
     private void buildSortCondition(LambdaQueryWrapper<Course> wrapper,
                                     String sortField, String sortOrder) {
+
+        // 1. 确定排序字段（如果为空，默认使用 id）
+        String finalSortField = (sortField == null || sortField.isBlank()) ? "id" : sortField;
+
+        // 2. 确定排序方向（如果为空或非法，默认降序 desc）
+        //    只要 sortOrder 是 "asc"（不区分大小写）就升序，其余情况（包括空、null、desc）都降序
         boolean isAsc = "asc".equalsIgnoreCase(sortOrder);
 
-        if ("name".equals(sortField)) {
+        // 3. 根据确定的字段和方向构建排序条件
+        if ("name".equals(finalSortField)) {
             wrapper.orderBy(true, isAsc, Course::getName);
-        } else if ("teacherName".equals(sortField)) {
+        } else if ("teacherName".equals(finalSortField)) {
             wrapper.orderBy(true, isAsc, Course::getTeacherName);
-        } else if ("credit".equals(sortField)) {
+        } else if ("credit".equals(finalSortField)) {
             wrapper.orderBy(true, isAsc, Course::getCredit);
         } else {
-            // 默认按ID倒序
-            wrapper.orderByDesc(Course::getId);
+            // 默认按 ID 排序（包括 finalSortField 为 "id" 或未知字段的情况）
+            wrapper.orderBy(true, isAsc, Course::getId);
         }
     }
 }

@@ -24,6 +24,7 @@ logging:
     root: INFO
     org.example: DEBUG
     org.springframework.web: DEBUG
+    org.springframework.cache: TRACE
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
