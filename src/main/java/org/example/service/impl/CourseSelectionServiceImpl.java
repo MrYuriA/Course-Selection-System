@@ -32,6 +32,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    //发生任何异常都会进行操作回滚，对于判断执行顺序可以放宽松,但仍建议校验在先,执行在后,减少不必要的回滚节省数据库资源
     public void selectCourse(Long studentId, Long courseId) {
 
         if (studentId == null || courseId == null) {
@@ -69,19 +70,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                 throw new BusinessException("课程容量已满");
             }
 
-            // 3. 防止重复选课
-            Long count = courseSelectionMapper.selectCount(
-                    new LambdaQueryWrapper<CourseSelection>()
-                            .eq(CourseSelection::getStudentId, studentId)
-                            .eq(CourseSelection::getCourseId, courseId)
-                            .eq(CourseSelection::getStatus, SelectionStatus.NORMAL.getCode())
-            );
-            if (count > 0) {
-                log.warn("选课失败：重复选课。学生ID: {}, 课程ID: {}", studentId, courseId);  // ← 加 WARN
-                throw new BusinessException("请勿重复选课");
-            }
-
-            // 4. 时间冲突检查
+            // 3. 时间冲突检查
             int conflictCount = courseSelectionMapper.countTimeConflict(studentId,
                     course.getStartTime(), course.getEndTime());
             if (conflictCount > 0) {
@@ -90,7 +79,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                 throw new BusinessException("与已选课程时间冲突");
             }
 
-            // 5. 学分上限校验
+            // 4. 学分上限校验
             int currentCredits = courseSelectionMapper.sumSelectedCredits(studentId);
 
             BigDecimal currentCreditsDecimal = BigDecimal.valueOf(currentCredits);
@@ -102,14 +91,33 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                 throw new BusinessException("超过学分上限");
             }
 
-            // 6. 执行选课
-            CourseSelection selection = new CourseSelection();
-            selection.setStudentId(studentId);
-            selection.setCourseId(courseId);
-            selection.setStatus(SelectionStatus.NORMAL);
-            courseSelectionMapper.insert(selection);
+            // 5. 防止重复选课/如果曾经退课则重新激活选课记录
+            CourseSelection existing = courseSelectionMapper.selectOne(
+                    new LambdaQueryWrapper<CourseSelection>()
+                            .eq(CourseSelection::getStudentId, studentId)
+                            .eq(CourseSelection::getCourseId, courseId)
+            );
 
-            // 更新课程已选人数
+            // 6. 执行选课/激活逻辑
+            if (existing != null) {
+                if (SelectionStatus.NORMAL.equals(existing.getStatus())) {
+                    log.warn("选课失败：重复选课。学生ID: {}, 课程ID: {}", studentId, courseId);
+                    throw new BusinessException("请勿重复选课");
+                }
+                // 已退课 → 重新激活
+                existing.setStatus(SelectionStatus.NORMAL);
+                courseSelectionMapper.updateById(existing);
+                log.info("重新激活选课记录。学生ID: {}, 课程ID: {}", studentId, courseId);
+            } else {
+                // 不存在 → 插入新记录
+                CourseSelection selection = new CourseSelection();
+                selection.setStudentId(studentId);
+                selection.setCourseId(courseId);
+                selection.setStatus(SelectionStatus.NORMAL);
+                courseSelectionMapper.insert(selection);
+            }
+
+            // 7. 更新课程已选人数
             int update = courseMapper.update(null, new LambdaUpdateWrapper<Course>()
                     .setSql("selected_count = selected_count + 1")
                     .eq(Course::getId, courseId)
@@ -121,7 +129,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                 throw new BusinessException("选课失败，课程刚刚已满");
             }
 
-            // 7. 选课成功
+            // 8. 选课成功
             log.info("选课成功。学生ID: {}, 课程ID: {}, 课程名: {}, 学分: {}",
                     studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
         }finally {
@@ -145,7 +153,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));
 
         if (!locked) {
-            log.warn("选课失败：系统繁忙，请稍后重试。课程ID：{}", courseId);
+            log.warn("退课失败：系统繁忙，请稍后重试。课程ID：{}", courseId);
             throw new BusinessException("系统繁忙，请稍后重试");
         }
 

@@ -11,6 +11,11 @@ import java.math.BigDecimal;
 @Schema(description = "学生分页查询参数")
 public class StuQueryParam {
 
+    //Student（实体/业务对象）：对应数据库表或业务核心，添加 @NotNull、@Size 等严格校验，确保业务数据完整性（如姓名不能为空、年龄必须大于0）。
+
+    //StudentPageQuery（查询对象）：只对“分页基础参数”添加非空校验，对“过滤条件”完全不添加 @NotNull 或 @NotBlank。
+    //核心逻辑：在 Service 层处理查询时，直接判断 if (studentName != null) 来决定是否拼接该条件
+
     @Schema(description = "页码", example = "1")
     @Min(value = 1, message = "页码最小为1")
     private Integer page = 1;
@@ -23,17 +28,14 @@ public class StuQueryParam {
     @Schema(description = "学生ID")
     private Long id;
 
-    @NotBlank(message = "学生姓名不能为空")
     @Size(max = 20, message = "学生姓名最多20个字符")
     @Schema(description = "学生姓名")
     private String name;
 
     @Schema(description = "学号")
-    @NotBlank(message = "学号不能为空")
     private String studentNo;
 
     @Schema(description = "最大可选学分")
-    @NotNull(message = "最大可选学分不能为空")
     @DecimalMin(value = "0.5", message = "学分不能低于0.5")  // 根据实际要求调整
     private BigDecimal maxCredit;
 
