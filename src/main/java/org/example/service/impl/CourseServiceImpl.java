@@ -43,7 +43,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @CacheEvict(value = "coursePage", allEntries = true)
+    @CacheEvict(value = "coursePage", allEntries = true)//设置缓存失效区域和范围
     public void updateCourseInfo(Long id, Course course) {
 
         if (course.getStartTime().isAfter(course.getEndTime()) ||
@@ -75,7 +75,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Cacheable(value = "coursePage", key = "#courseQueryParam.hashCode()")
+    @Cacheable(value = "coursePage", key = "#courseQueryParam")//先查后存
     public PageResult<Course> getPageInfo(CourseQueryParam courseQueryParam) {
         // 1. 创建分页对象
         Page<Course> page = new Page<>(courseQueryParam.getPage(),
