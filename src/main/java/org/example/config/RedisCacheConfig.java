@@ -25,6 +25,7 @@ public class RedisCacheConfig {
 
         //配置翻译规则（ObjectMapper）→ 交给执行者序列化器（Generic...Serializer）→ 存入 Config（.serializeValuesWith）
         //本配置类主要针对Value的序列化规则进行配置然后交给序列化器，最后存入Config 返回一个基于自定义好的Config的RedisCacheManager
+        //为解决查询命中缓存时，取得的数据与期望数据格式不一致问题
 
         //  1. 造一本“翻译手册”（ObjectMapper），并注册时间支持（JavaTimeModule）
         //Jackson 库的核心类。所有 Java 对象和 JSON 之间的互转，都由它负责。

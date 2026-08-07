@@ -134,7 +134,14 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                     studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
         }finally {
             // 释放锁
-            redisLockUtil.unlock(lockKey, lockValue);
+            Long result = redisLockUtil.unlock(lockKey, lockValue);
+
+            if (result == null || result == 0) {
+                // 打印 warn 日志：可能锁已过期，或者被其他线程持有（说明当前线程不该删）
+                log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
+            } else {
+                log.debug("释放锁成功，key: {}", lockKey);
+            }
         }
         }
 
@@ -194,7 +201,15 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
 
             log.info("退课成功。学生ID: {}, 课程ID: {}, 课程名: {}", studentId, courseId, course.getName());
         }finally {
-            redisLockUtil.unlock(lockKey, lockValue);
+            // 释放锁
+            Long result = redisLockUtil.unlock(lockKey, lockValue);
+
+            if (result == null || result == 0) {
+                // 打印 warn 日志：可能锁已过期，或者被其他线程持有（说明当前线程不该删）
+                log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
+            } else {
+                log.debug("释放锁成功，key: {}", lockKey);
+            }
         }
     }
 }

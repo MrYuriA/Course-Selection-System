@@ -2,15 +2,30 @@ package org.example.util;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collections;
 
 @Component
 @RequiredArgsConstructor
 public class RedisLockUtil {
 
     private final StringRedisTemplate redisTemplate;
+
+    // 1. 定义为静态常量，只加载一次，避免重复编译
+    private static final RedisScript<Long> UNLOCK_SCRIPT;
+
+    static {
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+                "   return redis.call('del', KEYS[1]) " +
+                "else " +
+                "   return 0 " +
+                "end";
+        UNLOCK_SCRIPT = new DefaultRedisScript<>(script, Long.class);
+    }
 
     /**
      * 尝试获取锁
@@ -29,10 +44,13 @@ public class RedisLockUtil {
     /**
      * 释放锁（需校验value是否匹配，避免误删别人的锁）
      */
-    public void unlock(String key, String value) {
-        String current = redisTemplate.opsForValue().get(key);
-        if (value.equals(current)) {
-            redisTemplate.delete(key);
-        }
+    public Long unlock(String key, String value) {
+        // 2. 执行 Lua 脚本，返回 1 表示删除成功，0 表示删除失败（值不匹配或已过期）
+        Long result = redisTemplate.execute(
+                UNLOCK_SCRIPT,
+                Collections.singletonList(key), // KEYS[1]
+                value                           // ARGV[1]
+        );
+      return  result;
     }
 }
