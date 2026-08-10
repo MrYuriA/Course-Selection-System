@@ -68,7 +68,7 @@ public class StudentServiceImpl implements StudentService {
         log.info("注册成功，学号：{}，学生ID：{}", param.getStudentNo(), student.getId());
     }
 
-    //按照id查询
+    //按照id查询,查看个人信息拉进缓存
     @Override
     public Student getStudentInfo(Long id) {
 
