@@ -40,12 +40,13 @@ public class CourseServiceImpl implements CourseService {
         String key = CACHE_DETAIL_PREFIX + id;
 
         // 调用手动缓存：防穿透 + 防雪崩
-        Course course = cacheService.getOrLoad(
+        Course course = cacheService.getOrLoadWithMutex(
                 key,
                 Course.class,
                 () -> courseMapper.selectById(id),   // 数据库查询逻辑
                 Duration.ofMinutes(10),              // 真实数据缓存10分钟（内部会自动加随机）
-                Duration.ofSeconds(30)               // 空值标记缓存30秒
+                Duration.ofSeconds(30),               // 空值标记缓存30秒
+                Duration.ofSeconds(10)                // 锁超时
         );
 
         if (course == null) {
