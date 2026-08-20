@@ -17,7 +17,15 @@ spring:
           max-active: 2
           max-idle: 2
           min-idle: 1
-
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: admin
+    password: admin123
+    # 开启生产者 Confirm（消息到达交换机回调）
+    publisher-confirm-type: correlated
+    # 开启路由失败回调（消息未路由到队列时触发）
+    publisher-returns: true
 # 日志配置
 logging:
   level:

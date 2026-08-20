@@ -4,18 +4,26 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;  // 别忘了加这个
+import org.example.config.RabbitMQConfig;
+import org.example.dto.ReleaseMessage;
+import org.example.dto.WaitingMessage;
+import org.example.enums.SelectCourseResult;
 import org.example.enums.SelectionStatus;
 import org.example.exception.BusinessException;
 import org.example.mapper.CourseMapper;
 import org.example.mapper.CourseSelectionMapper;
+import org.example.mapper.CourseWaitingQueueMapper;
 import org.example.mapper.StudentMapper;
 import org.example.pojo.Course;
 import org.example.pojo.CourseSelection;
 import org.example.pojo.Student;
 import org.example.service.CourseSelectionService;
 import org.example.util.RedisLockUtil;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -29,11 +37,15 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
     private final CourseMapper courseMapper;
     private final CourseSelectionMapper courseSelectionMapper;
     private final RedisLockUtil redisLockUtil;
+    private final CourseWaitingQueueMapper courseWaitingQueueMapper;
+    private final RabbitTemplate rabbitTemplate;
+
+    //RabbitMQ：选课满分支没有数据库写操作，发消息不受事务影响；退课有写操作，必须等事务提交后再发消息，避免数据不一致。
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     //发生任何异常都会进行操作回滚，对于判断执行顺序可以放宽松,但仍建议校验在先,执行在后,减少不必要的回滚节省数据库资源
-    public void selectCourse(Long studentId, Long courseId) {
+    public SelectCourseResult selectCourse(Long studentId, Long courseId) {
 
         if (studentId == null || courseId == null) {
             throw new BusinessException("学生ID和课程ID不能为空");
@@ -66,8 +78,12 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
             }
             if (course.getSelectedCount() >= course.getCapacity()) {
                 log.warn("选课失败：课程容量已满。课程ID: {}, 当前人数: {}, 容量: {}",
-                        courseId, course.getSelectedCount(), course.getCapacity());  // ← 加 WARN
-                throw new BusinessException("课程容量已满");
+                        courseId, course.getSelectedCount(), course.getCapacity());  // ← 课程已满,加入排队队列
+                return joinWaitingQueue(studentId, courseId);
+
+                // 唯一的风险是：如果发消息后，同一个事务内后续还有其他操作抛异常导致回滚，消息已经发出去了，可能造成“发了候补消息但事务回滚”。
+                // 但目前选课满分支中，发完消息后就 return 了，没有后续操作，所以不会触发回滚。
+                // 如果将来在发消息后还写了数据库，才需要考虑事务一致性。
             }
 
             // 3. 时间冲突检查
@@ -132,6 +148,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
             // 8. 选课成功
             log.info("选课成功。学生ID: {}, 课程ID: {}, 课程名: {}, 学分: {}",
                     studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
+            return SelectCourseResult.SUCCESS;
         }finally {
             // 释放锁
             Long result = redisLockUtil.unlock(lockKey, lockValue);
@@ -211,5 +228,46 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
                 log.debug("释放锁成功，key: {}", lockKey);
             }
         }
+        // 在事务提交后发送释放消息
+        //  Spring 的事务管理器在事务提交前后提供了一些回调点，你可以注册一个 TransactionSynchronization 对象
+        //  afterCommit() 方法会在事务成功提交后由 Spring 自动调用,达到了“事务提交后执行”的目的。
+        // 为什么这么做:因为方法返回后事务才提交，在方法内部发送时事务还没提交。Spring 没有直接提供“事务提交后执行”的注解，所以需要使用这个回调机制。
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                ReleaseMessage msg = new ReleaseMessage();
+                msg.setCourseId(courseId);
+                rabbitTemplate.convertAndSend(
+                        RabbitMQConfig.COURSE_EXCHANGE,
+                        RabbitMQConfig.RELEASE_ROUTING_KEY,
+                        msg
+                );
+                log.info("已发送空位释放消息。courseId={}", courseId);
+            }
+        });
+    }
+
+    /**
+     * 课程已满时自动加入候补队列
+     */
+    private SelectCourseResult joinWaitingQueue(Long studentId, Long courseId) {
+        // 1. 检查是否已在候补队列（status=0）
+        int count = courseWaitingQueueMapper.countActiveWaiting(studentId, courseId);
+        if (count > 0) {
+            log.warn("学生已在候补队列中，无需重复加入。studentId={}, courseId={}", studentId, courseId);
+            return SelectCourseResult.ALREADY_WAITING;
+        }
+
+        // 2. 发送 MQ 消息
+        WaitingMessage msg = new WaitingMessage();
+        msg.setStudentId(studentId);
+        msg.setCourseId(courseId);
+        rabbitTemplate.convertAndSend(
+                RabbitMQConfig.COURSE_EXCHANGE,
+                RabbitMQConfig.WAITING_ROUTING_KEY,
+                msg
+        );
+        log.info("已发送候补消息。studentId={}, courseId={}", studentId, courseId);
+        return SelectCourseResult.WAITING;
     }
 }

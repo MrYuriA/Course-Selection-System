@@ -39,7 +39,7 @@ public class CourseServiceImpl implements CourseService {
 
         String key = CACHE_DETAIL_PREFIX + id;
 
-        // 调用手动缓存：防穿透 + 防雪崩
+        // 调用手动缓存：防穿透 + 防雪崩 +防击穿
         Course course = cacheService.getOrLoadWithMutex(
                 key,
                 Course.class,
@@ -85,6 +85,9 @@ public class CourseServiceImpl implements CourseService {
         }
         log.info("修改课程成功,课程id{},课程名称{},教师名称{}", id ,course.getName(), course.getTeacherName());
         // ----- 手动清除缓存（替代 @CacheEvict） -----
+
+        //  *** 后期改进先更新数据库-删除缓存-缓存删除失败重试-保证缓存数据库一致性***
+
         // ① 删除该课程的详情缓存
         cacheService.evict(CACHE_DETAIL_PREFIX + id);
         // ② 删除所有分页列表缓存（因为数据变了，所有分页结果都可能受影响）
@@ -111,6 +114,7 @@ public class CourseServiceImpl implements CourseService {
         String key = CacheKeyUtil.generate(CACHE_PAGE_PREFIX, courseQueryParam);
         // 手动缓存：分页数据也适用“防穿透”，但空值标记不适用于集合，这里直接返回 null 时正常逻辑会抛异常
         // 我们使用 getOrLoad 但泛型为 PageResult，空值标记存为 "NULL" 不影响（反正 PageResult 不会为 null）
+        //条件分页查询使用互斥锁收益极低,采用无锁手动调用缓存方法
         PageResult<Course> pageResult = cacheService.getOrLoad(
                 key,
                 PageResult.class,

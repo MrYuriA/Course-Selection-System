@@ -28,5 +28,17 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data  # 记得在文件底部 volumes 里声明 redis_data
+  rabbitmq:
+    image: rabbitmq:3-management   # 带管理界面的镜像
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"    # 应用连接端口
+      - "15672:15672"  # 管理界面端口
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq   # 数据持久化
 volumes:
   redis_data:
+  rabbitmq_data:

@@ -37,8 +37,11 @@ public class RedisLockUtil {
     public boolean tryLock(String key, String value, Duration timeout) {
         return Boolean.TRUE.equals(
                 redisTemplate.opsForValue()
-                        .setIfAbsent(key, value, timeout)
+                        .setIfAbsent(key, value, timeout) //
         );
+        //setIfAbsent（即 Redis 的 SETNX 命令）是原子操作
+        // 当且仅当 Key 不存在时，才会设置值并返回 true。
+        // 保证了在并发环境下，只有一个线程能成功设置这把锁，其他线程全部失败。
     }
 
     /**

@@ -4,6 +4,7 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.util.JwtUtil;
 import org.example.util.UserContext;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import java.io.IOException;
 //Jwt过滤器，定义当请求到达时，检查请求路径，根据路径选择拦截或者放行，如果拦截则检查请求头中是否包含Token，并校验Token的合法性。
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JwtAuthFilter extends OncePerRequestFilter { // 也可以实现 Filter 接口，用 OncePerRequestFilter 更简单
 
     private final JwtUtil jwtUtil;
