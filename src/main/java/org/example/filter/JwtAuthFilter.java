@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.dto.TokenInfo;
 import org.example.util.JwtUtil;
 import org.example.util.UserContext;
 import org.springframework.stereotype.Component;
@@ -38,8 +39,9 @@ public class JwtAuthFilter extends OncePerRequestFilter { // 也可以实现 Fil
             //首先，校验token是否合规合法
             //然后，拿取学生ID字段存入线程内存
             if (jwtUtil.validateToken(token)) {
-                Long studentId = jwtUtil.getStudentIdFromToken(token);
-                UserContext.setCurrentStudentId(studentId);
+                TokenInfo tokenInfo = jwtUtil.parseToken(token);
+                UserContext.setCurrentStudentId(tokenInfo.getStudentId());
+                UserContext.setRole(tokenInfo.getRole());
                 try {
                     filterChain.doFilter(request, response);
                 } finally {//如果放行后报错 线程清理可能不会执行，使用finally保证线程内存清理

@@ -39,5 +39,7 @@ public class ReleaseConsumer {
             channel.basicNack(deliveryTag, false, true);
         }
         //try 中处理业务，成功后 basicAck，失败 basicNack 重回队列，这就是手动 ACK 的价值。
+
+        //加锁 -- 区分业务和系统错误 增加处理逻辑 避免重复消费问题
     }
 }

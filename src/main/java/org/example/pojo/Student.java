@@ -56,4 +56,7 @@ public class Student {
     @Schema(description = "逻辑删除标志 (0-未删除, 1-已删除)")
     private Integer deleted;
 
+    @Schema(description = "角色 (0-学生, 1-管理员)")
+    private Integer role;
+
 }

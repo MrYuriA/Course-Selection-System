@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.annotation.RequireRole;
 import org.example.pojo.Course;
 import org.example.pojo.CourseQueryParam;
 import org.example.pojo.PageResult;
@@ -51,6 +52,7 @@ public class CourseController {
     }
 
     @PostMapping
+    @RequireRole("ADMIN")
     @Operation(summary = "添加课程")
     public Result<Void> addInfo(@Valid @Parameter(description = "添加的课程信息") @RequestBody Course course) {
         log.info("添加课程请求，课程名称={}, 授课教师={}", course.getName(), course.getTeacherName());
@@ -59,6 +61,7 @@ public class CourseController {
     }
 
     @PutMapping("/{id}")
+    @RequireRole("ADMIN")
     @Operation(summary = "根据路径ID修改课程")
     public Result<Void> updateInfo(@Parameter(description = "课程ID") @PathVariable Long id,
                              @Parameter(description = "要修改的课程信息") @RequestBody @Valid Course course) {
@@ -68,6 +71,7 @@ public class CourseController {
     }
 
     @DeleteMapping("/{id}")
+    @RequireRole("ADMIN")
     @Operation(summary = "根据ID删除课程")
     public Result<Void> delInfo(@Parameter(description = "课程ID") @PathVariable Long id) {
         log.info("删除课程请求，课程id：{}", id);

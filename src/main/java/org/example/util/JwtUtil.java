@@ -2,6 +2,7 @@ package org.example.util;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import org.example.dto.TokenInfo;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
@@ -19,8 +20,9 @@ public class JwtUtil {
     private final SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 
     // 生成 Token
-    public String generateToken(Long studentId) {
+    public String generateToken(Long studentId ,Integer role) {
         return Jwts.builder()
+                .claim("role", role)
                 .subject(studentId.toString())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + EXPIRATION))
@@ -28,14 +30,18 @@ public class JwtUtil {
                 .compact();
     }
 
-    // 从 Token 中解析出学生 ID
-    public Long getStudentIdFromToken(String token) {
+    // 从 Token 中解析出学生 ID和角色
+    public TokenInfo parseToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
-        return Long.parseLong(claims.getSubject());
+
+        return new TokenInfo(
+                Long.parseLong(claims.getSubject()),
+                claims.get("role", Integer.class)
+        );
     }
 
     // 验证 Token 是否有效
