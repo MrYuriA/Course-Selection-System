@@ -16,8 +16,14 @@ services:
     # 数据卷挂载（核心）：让数据永久保存在你电脑的 ./mysql_data 文件夹里，删了容器数据也不丢
     volumes:
       - ./init:/docker-entrypoint-initdb.d
+      - mysql_data:/var/lib/mysql            # 数据持久化
     # 确保容器意外挂掉后能自动重启
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   redis:
     image: redis:7.0
     container_name: springboot-redis
@@ -39,6 +45,29 @@ services:
       RABBITMQ_DEFAULT_PASS: admin123
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq   # 数据持久化
+  app:
+    build: .                       # 使用当前目录的 Dockerfile 构建镜像
+    container_name: course-selection-app
+    ports:
+      - "8080:8080"               # 应用端口映射
+    depends_on:
+      mysql:
+        condition: service_healthy   # 等待 MySQL 健康检查通过
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/springboot_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: 123456
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: admin
+      SPRING_RABBITMQ_PASSWORD: admin123
+    restart: unless-stopped
 volumes:
+  mysql_data:
   redis_data:
   rabbitmq_data:
