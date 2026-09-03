@@ -27,6 +27,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.UUID;
 
 @Slf4j  // 类上加这个注解
 @Service
@@ -52,7 +53,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         }
 
         String lockKey = "lock:course:" + courseId;
-        String lockValue = String.valueOf(studentId);
+        String lockValue = UUID.randomUUID().toString();
 
         // 尝试获取锁，最多等待3秒
         boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));
@@ -171,7 +172,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         }
 
         String lockKey = "lock:course:" + courseId;
-        String lockValue = String.valueOf(studentId);
+        String lockValue = UUID.randomUUID().toString();
 
         // 尝试获取锁，最多等待3秒
         boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));

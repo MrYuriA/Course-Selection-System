@@ -39,8 +39,6 @@ public class StudentServiceImpl implements StudentService {
             log.warn("登录失败：密码错误，学号：{}", param.getStudentNo());
             throw new BusinessException("学号或密码错误");
         }
-        log.info("前端传入密码：{}", param.getPassword());
-        log.info("数据库存储密码：{}", student.getPassword());
         String token = jwtUtil.generateToken(student.getId(),student.getRole() );
         log.info("登录成功，学号：{}，学生ID：{}", param.getStudentNo(), student.getId());
         return token;

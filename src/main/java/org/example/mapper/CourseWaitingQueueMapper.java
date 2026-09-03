@@ -25,4 +25,7 @@ public interface CourseWaitingQueueMapper extends BaseMapper<CourseWaitingQueue>
      */
     @Select("SELECT COUNT(*) FROM course_waiting_queue WHERE student_id = #{studentId} AND course_id = #{courseId} AND status = 0")
     int countActiveWaiting(@Param("studentId") Long studentId, @Param("courseId") Long courseId);
+
+    @Select("SELECT COALESCE(MAX(queue_number), 0) FROM course_waiting_queue WHERE course_id = #{courseId} AND status = 0")
+    int selectMaxQueueNumber(@Param("courseId") Long courseId);
 }

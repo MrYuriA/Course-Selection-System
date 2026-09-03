@@ -47,12 +47,15 @@ public class WaitingConsumer {
                             .eq(CourseWaitingQueue::getCourseId, msg.getCourseId())
             );
 
+
+            int maxQueue = waitingQueueMapper.selectMaxQueueNumber(msg.getCourseId());
+            int newQueue = maxQueue + 1;
+
             if (existing != null) {
                 // 复用已有记录，重新排队
                 existing.setStatus(0); // 排队中
-                // 可重新计算 queue_number，这里简单处理，保持原值或设为0
-                // 更好的做法：查询当前最大 queue_number + 1
-                existing.setQueueNumber(0); // 如果你有生成逻辑，替换掉
+                // 查询当前最大 queue_number + 1
+                existing.setQueueNumber(newQueue);
                 waitingQueueMapper.updateById(existing);
                 log.info("重新激活候补记录。studentId={}, courseId={}", msg.getStudentId(), msg.getCourseId());
             } else {
@@ -61,7 +64,7 @@ public class WaitingConsumer {
                 record.setStudentId(msg.getStudentId());
                 record.setCourseId(msg.getCourseId());
                 record.setStatus(0);
-                record.setQueueNumber(0); // 同样，应计算实际排队号
+                record.setQueueNumber(newQueue);
                 record.setCreateTime(LocalDateTime.now());
                 waitingQueueMapper.insert(record);
                 log.info("插入新候补记录。studentId={}, courseId={}", msg.getStudentId(), msg.getCourseId());
