@@ -91,7 +91,7 @@ class CourseSelectionServiceImplTest {
         // 断言结果
         assertEquals(SelectCourseResult.WAITING, result);
 
-        // 验证发送了 MQ 消息
+        // 验证发送了 MQ 消息,Mockito 会记录每个 Mock 对象的方法调用历史。verify 就是去查这些记录，看是否符合你的期望。
         verify(rabbitTemplate, times(1)).convertAndSend(
                 eq(RabbitMQConfig.COURSE_EXCHANGE),
                 eq(RabbitMQConfig.WAITING_ROUTING_KEY),
