@@ -55,6 +55,44 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         String lockKey = "lock:course:" + courseId;
         String lockValue = UUID.randomUUID().toString();
 
+        // 1. 检查学生是否存在
+        Student student = studentMapper.selectById(studentId);
+        if (student == null) {
+            log.warn("选课失败：学生不存在。学生ID: {}", studentId);  // ← 加 WARN
+            throw new BusinessException("学生不存在");
+        }
+
+        // 2. 检查课程是否存在、是否开放、容量是否已满
+        Course course = courseMapper.selectById(courseId);
+        if (course == null || !(course.getIsOpen())) {
+            log.warn("选课失败：课程不存在或未开放。课程ID: {}", courseId);  // ← 加 WARN
+            throw new BusinessException("课程不存在或未开放");
+        }
+
+
+        // 3. 时间冲突检查
+        int conflictCount = courseSelectionMapper.countTimeConflict(studentId,
+                course.getStartTime(), course.getEndTime());
+        if (conflictCount > 0) {
+            log.warn("选课失败：与已选课程时间冲突。学生ID: {}, 课程ID: {}, 新课时间: {} - {}",
+                    studentId, courseId, course.getStartTime(), course.getEndTime());  // ← 加 WARN
+            throw new BusinessException("与已选课程时间冲突");
+        }
+
+        // 4. 学分上限校验
+        int currentCredits = courseSelectionMapper.sumSelectedCredits(studentId);
+
+        BigDecimal currentCreditsDecimal = BigDecimal.valueOf(currentCredits);
+        BigDecimal estimatedTotal = course.getCredit().add(currentCreditsDecimal);
+
+        if (estimatedTotal.compareTo(student.getMaxCredit()) > 0) {
+            log.warn("选课失败：超过学分上限。学生ID: {}, 已选学分: {}, 新课学分: {}, 学分上限: {}",
+                    studentId, currentCredits, course.getCredit(), student.getMaxCredit());  // ← 加 WARN
+            throw new BusinessException("超过学分上限");
+        }
+
+
+
         // 尝试获取锁，最多等待3秒
         boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));
 
@@ -63,105 +101,76 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
             throw new BusinessException("系统繁忙，请稍后重试");
         }
 
-        try {
-            // 1. 检查学生是否存在
-            Student student = studentMapper.selectById(studentId);
-            if (student == null) {
-                log.warn("选课失败：学生不存在。学生ID: {}", studentId);  // ← 加 WARN
-                throw new BusinessException("学生不存在");
-            }
-
-            // 2. 检查课程是否存在、是否开放、容量是否已满
-            Course course = courseMapper.selectById(courseId);
-            if (course == null || !(course.getIsOpen())) {
-                log.warn("选课失败：课程不存在或未开放。课程ID: {}", courseId);  // ← 加 WARN
-                throw new BusinessException("课程不存在或未开放");
-            }
-            if (course.getSelectedCount() >= course.getCapacity()) {
-                log.warn("选课失败：课程容量已满。课程ID: {}, 当前人数: {}, 容量: {}",
-                        courseId, course.getSelectedCount(), course.getCapacity());  // ← 课程已满,加入排队队列
-                return joinWaitingQueue(studentId, courseId);
-
-                // 唯一的风险是：如果发消息后，同一个事务内后续还有其他操作抛异常导致回滚，消息已经发出去了，可能造成“发了候补消息但事务回滚”。
-                // 但目前选课满分支中，发完消息后就 return 了，没有后续操作，所以不会触发回滚。
-                // 如果将来在发消息后还写了数据库，才需要考虑事务一致性。
-            }
-
-            // 3. 时间冲突检查
-            int conflictCount = courseSelectionMapper.countTimeConflict(studentId,
-                    course.getStartTime(), course.getEndTime());
-            if (conflictCount > 0) {
-                log.warn("选课失败：与已选课程时间冲突。学生ID: {}, 课程ID: {}, 新课时间: {} - {}",
-                        studentId, courseId, course.getStartTime(), course.getEndTime());  // ← 加 WARN
-                throw new BusinessException("与已选课程时间冲突");
-            }
-
-            // 4. 学分上限校验
-            int currentCredits = courseSelectionMapper.sumSelectedCredits(studentId);
-
-            BigDecimal currentCreditsDecimal = BigDecimal.valueOf(currentCredits);
-            BigDecimal estimatedTotal = course.getCredit().add(currentCreditsDecimal);
-
-            if (estimatedTotal.compareTo(student.getMaxCredit()) > 0) {
-                log.warn("选课失败：超过学分上限。学生ID: {}, 已选学分: {}, 新课学分: {}, 学分上限: {}",
-                        studentId, currentCredits, course.getCredit(), student.getMaxCredit());  // ← 加 WARN
-                throw new BusinessException("超过学分上限");
-            }
-
-            // 5. 防止重复选课/如果曾经退课则重新激活选课记录
-            CourseSelection existing = courseSelectionMapper.selectOne(
-                    new LambdaQueryWrapper<CourseSelection>()
-                            .eq(CourseSelection::getStudentId, studentId)
-                            .eq(CourseSelection::getCourseId, courseId)
-            );
-
-            // 6. 执行选课/激活逻辑
-            if (existing != null) {
-                if (SelectionStatus.NORMAL.equals(existing.getStatus())) {
-                    log.warn("选课失败：重复选课。学生ID: {}, 课程ID: {}", studentId, courseId);
-                    throw new BusinessException("请勿重复选课");
+        // 注册事务回调：事务提交/回滚后释放锁
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                Long result = redisLockUtil.unlock(lockKey, lockValue);
+                if (result == null || result == 0) {
+                    log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
+                } else {
+                    log.debug("释放锁成功，key: {}", lockKey);
                 }
-                // 已退课 → 重新激活
-                existing.setStatus(SelectionStatus.NORMAL);
-                courseSelectionMapper.updateById(existing);
-                log.info("重新激活选课记录。学生ID: {}, 课程ID: {}", studentId, courseId);
-            } else {
-                // 不存在 → 插入新记录
-                CourseSelection selection = new CourseSelection();
-                selection.setStudentId(studentId);
-                selection.setCourseId(courseId);
-                selection.setStatus(SelectionStatus.NORMAL);
-                courseSelectionMapper.insert(selection);
             }
+        });
 
-            // 7. 更新课程已选人数
-            int update = courseMapper.update(null, new LambdaUpdateWrapper<Course>()
-                    .setSql("selected_count = selected_count + 1")
-                    .eq(Course::getId, courseId)
-                    .apply("selected_count < capacity")
-            );
-            if (update == 0) {
-                log.warn("选课失败：并发冲突，课程刚刚已满。学生ID: {}, 课程ID: {}",
-                        studentId, courseId);  // ← 加 WARN
-                throw new BusinessException("选课失败，课程刚刚已满");
-            }
-
-            // 8. 选课成功
-            log.info("选课成功。学生ID: {}, 课程ID: {}, 课程名: {}, 学分: {}",
-                    studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
-            return SelectCourseResult.SUCCESS;
-        }finally {
-            // 释放锁
-            Long result = redisLockUtil.unlock(lockKey, lockValue);
-
-            if (result == null || result == 0) {
-                // 打印 warn 日志：可能锁已过期，或者被其他线程持有（说明当前线程不该删）
-                log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
-            } else {
-                log.debug("释放锁成功，key: {}", lockKey);
-            }
+        // 1. 拿到锁后再查一次，用于展示当前容量、快速分流
+        // 注意：受 REPEATABLE READ 快照影响，这次读到的可能仍是拿锁之前的旧值，
+        // 所以「还有没有名额」最终以第 4 步的数据库原子扣减为准。
+        course = courseMapper.selectById(courseId);
+        if (course == null || !(course.getIsOpen())) {
+            log.warn("选课失败：课程不存在或未开放。课程ID: {}", courseId);  // ← 加 WARN
+            throw new BusinessException("课程不存在或未开放");
         }
+
+        // 2. 明显已满时不必再走扣减，直接排队
+        // 该分支内只发 MQ 消息、不再写库，所以消息不受后续回滚影响。
+        if (course.getSelectedCount() >= course.getCapacity()) {
+            log.warn("选课失败：课程容量已满。课程ID: {}, 当前人数: {}, 容量: {}",
+                    courseId, course.getSelectedCount(), course.getCapacity());  // ← 课程已满,加入排队队列
+            return joinWaitingQueue(studentId, courseId);
         }
+
+        // 3. 防止重复选课
+        CourseSelection existing = courseSelectionMapper.selectOne(
+                new LambdaQueryWrapper<CourseSelection>()
+                        .eq(CourseSelection::getStudentId, studentId)
+                        .eq(CourseSelection::getCourseId, courseId)
+        );
+        if (existing != null && SelectionStatus.NORMAL.equals(existing.getStatus())) {
+            log.warn("选课失败：重复选课。学生ID: {}, 课程ID: {}", studentId, courseId);
+            throw new BusinessException("请勿重复选课");
+        }
+
+        // 4. 先由数据库原子扣减决定成败：影响行数为 0 说明名额已被抢完，转候补。
+        // 此刻尚未产生任何写操作，所以正常返回、事务提交也不会留下垃圾数据。
+        int update = courseMapper.update(null, new LambdaUpdateWrapper<Course>()
+                .setSql("selected_count = selected_count + 1")
+                .eq(Course::getId, courseId)
+                .apply("selected_count < capacity")
+        );
+        if (update == 0) {
+            log.warn("并发冲突，转入候补。studentId={}, courseId={}", studentId, courseId);
+            return joinWaitingQueue(studentId, courseId);  // 不报错，转候补
+        }
+
+        // 5. 扣减成功后再落选课记录：曾经退课的重新激活，否则插入新记录
+        if (existing != null) {
+            existing.setStatus(SelectionStatus.NORMAL);
+            courseSelectionMapper.updateById(existing);
+            log.info("重新激活选课记录。学生ID: {}, 课程ID: {}", studentId, courseId);
+        } else {
+            CourseSelection selection = new CourseSelection();
+            selection.setStudentId(studentId);
+            selection.setCourseId(courseId);
+            selection.setStatus(SelectionStatus.NORMAL);
+            courseSelectionMapper.insert(selection);
+        }
+
+        log.info("选课成功。学生ID: {}, 课程ID: {}, 课程名: {}, 学分: {}",
+                studentId, courseId, course.getName(), course.getCredit());  // ← 加 INFO
+        return SelectCourseResult.SUCCESS;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -174,6 +183,24 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
         String lockKey = "lock:course:" + courseId;
         String lockValue = UUID.randomUUID().toString();
 
+        // 1. 查询该学生的正常选课记录
+        CourseSelection selection = courseSelectionMapper.selectOne(
+                new LambdaQueryWrapper<CourseSelection>()
+                        .eq(CourseSelection::getStudentId, studentId)
+                        .eq(CourseSelection::getCourseId, courseId)
+                        .eq(CourseSelection::getStatus, SelectionStatus.NORMAL)
+        );
+        if (selection == null) {
+            log.warn("退课失败：选课记录不存在或已退课。学生ID: {}, 课程ID: {}", studentId, courseId);
+            throw new BusinessException("选课记录不存在或已退课");
+        }
+
+        // 2. 检查课程是否存在（可选，但建议校验）
+        Course course = courseMapper.selectById(courseId);
+        if (course == null) {
+            throw new BusinessException("课程不存在");
+        }
+
         // 尝试获取锁，最多等待3秒
         boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ofSeconds(3));
 
@@ -182,24 +209,18 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
             throw new BusinessException("系统繁忙，请稍后重试");
         }
 
-        try{
-            // 1. 查询该学生的正常选课记录
-            CourseSelection selection = courseSelectionMapper.selectOne(
-                    new LambdaQueryWrapper<CourseSelection>()
-                            .eq(CourseSelection::getStudentId, studentId)
-                            .eq(CourseSelection::getCourseId, courseId)
-                            .eq(CourseSelection::getStatus, SelectionStatus.NORMAL)
-            );
-            if (selection == null) {
-                log.warn("退课失败：选课记录不存在或已退课。学生ID: {}, 课程ID: {}", studentId, courseId);
-                throw new BusinessException("选课记录不存在或已退课");
+        // 注册事务回调：事务提交/回滚后释放锁
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                Long result = redisLockUtil.unlock(lockKey, lockValue);
+                if (result == null || result == 0) {
+                    log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
+                } else {
+                    log.debug("释放锁成功，key: {}", lockKey);
+                }
             }
-
-            // 2. 检查课程是否存在（可选，但建议校验）
-            Course course = courseMapper.selectById(courseId);
-            if (course == null) {
-                throw new BusinessException("课程不存在");
-            }
+        });
 
             // 3. 更新选课状态为已退
             selection.setStatus(SelectionStatus.WITHDRAWN);
@@ -218,17 +239,7 @@ public class CourseSelectionServiceImpl implements CourseSelectionService {
             }
 
             log.info("退课成功。学生ID: {}, 课程ID: {}, 课程名: {}", studentId, courseId, course.getName());
-        }finally {
-            // 释放锁
-            Long result = redisLockUtil.unlock(lockKey, lockValue);
 
-            if (result == null || result == 0) {
-                // 打印 warn 日志：可能锁已过期，或者被其他线程持有（说明当前线程不该删）
-                log.warn("释放锁失败，key: {}, value: {}, 可能锁已过期或被他人持有", lockKey, lockValue);
-            } else {
-                log.debug("释放锁成功，key: {}", lockKey);
-            }
-        }
         // 在事务提交后发送释放消息
         //  Spring 的事务管理器在事务提交前后提供了一些回调点，你可以注册一个 TransactionSynchronization 对象
         //  afterCommit() 方法会在事务成功提交后由 Spring 自动调用,达到了“事务提交后执行”的目的。

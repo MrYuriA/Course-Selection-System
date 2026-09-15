@@ -1,11 +1,13 @@
 package org.example;
 
 import org.example.util.RedisLockUtil;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+@Tag("integration")  // 需要真实的 Redis / MySQL / RabbitMQ，默认 mvn test 不跑
 @SpringBootTest
 public class RedisLockTest {
 

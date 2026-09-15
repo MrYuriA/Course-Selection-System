@@ -108,8 +108,9 @@ public class CacheService {
                 }
             }
 
-            // 2. 尝试获取锁
-            boolean locked = redisLockUtil.tryLock(lockKey, lockValue, lockTimeout);
+            // 2. 尝试获取锁。等待时间传 0：重试由下面这层 while 循环负责（3 次 × 50ms），
+            //    锁的过期时间才是 lockTimeout。
+            boolean locked = redisLockUtil.tryLock(lockKey, lockValue, Duration.ZERO, lockTimeout);
             if (locked) {
                 try {
                     // 3. 双重检查（抢到锁后再查一次缓存）,防止在拿到锁之前数据已经有其他人存入缓存
